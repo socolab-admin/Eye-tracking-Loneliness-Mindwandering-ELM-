@@ -1,0 +1,14 @@
+eye_file,subject_id,stimulus
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/01_Splitscreen.csv.gz,01,splitscreen
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/01_Sun.csv.gz,01,sun
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/01_Zima.csv.gz,01,zima
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/049_Hexagons.csv.gz,49,hexagons
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/049_Splitscreen.csv.gz,49,splitscreen
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/049_Zima.csv.gz,49,zima
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/40_Splitscreen.csv.gz,40,splitscreen
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/40_Zima.csv.gz,40,zima
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/52_Zima.csv.gz,52,zima
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/74_Hexagons.csv.gz,74,hexagons
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/74_Splitscreen.csv.gz,74,splitscreen
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/74_Zima.csv.gz,74,zima
+/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data/processed/eye_processed_videos/86_Turtles.csv.gz,86,turtles
