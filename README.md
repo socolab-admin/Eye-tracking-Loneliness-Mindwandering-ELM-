@@ -62,7 +62,9 @@ This repository serves as the central data storage and sharing platform for the 
 ├── .gitignore
 └── README.md
 ```
+## Synchronization Workflow
 
+Detailed documentation describing the synchronization of processed eye-tracking and fNIRS datasets is available in **[`docs/sync.md`](docs/sync.md)**.
 
 ## Data Pipeline & Architecture
 ```mermaid
