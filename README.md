@@ -37,3 +37,26 @@ This repository serves as the central data storage and sharing platform for the 
 * Format: CSV
 * Update Frequency: Static
 * Size: ~550 MB
+
+## Repository Structure
+
+The repository is organized to separate raw and processed datasets, quality-control outputs, analysis pipelines, and project documentation.
+
+```text
+├── data/
+│   ├── raw/                          # Original eye-tracking, fNIRS, and LSL/PsychoPy logs
+│   ├── processed/                    # Processed datasets for downstream analyses
+│   │   ├── eye_processed_videos/
+│   │   ├── eye_processed_SART/
+│   │   ├── fNIRS_processed_videos/
+│   │   ├── fNIRS_processed_SART/
+│   │   ├── eye_sync_fNIRS_videos/
+│   │   └── eye_sync_fNIRS_SART/
+│   └── qc/                           # Quality-control reports and preprocessing summaries
+│
+├── docs/                             # Documentation, protocols, and data dictionaries
+├── scripts/                          # R and MATLAB preprocessing/analysis pipelines
+├── .gitignore
+└── README.md
+```
+
