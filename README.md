@@ -2,37 +2,43 @@
 This repository serves as the central data storage and sharing platform for the Eye-tracking, Loneliness, and Mind-Wandering (ELM) project, supporting collaboration among researchers at the University of Southern California (USC) and Ohio State University (OSU). The project investigates whether loneliness is associated with idiosyncratic patterns of neural processing, visual attention, and various subjective states during naturalistic  and experimental tasks. The repository contains processed fNIRS, eye-tracking, and self-report data. Although the primary stakeholders are USC and OSU researchers working on the ELM project, the repository is publicly available to facilitate transparency, reproducibility, and secondary analyses by the broader scientific community.
 
 ## Dataset Overview
-### fNIRS Video-Viewing  Dataset
+### UCLA Loneliness Scores
+* Description: Totals of 20-item UCLA Loneliness Scale.
+* Format: CSV
+* Update Frequency: Static
+* Size: ~1 KB
+* 
+### fNIRS Video-Viewing
 * Description: Processed fNIRS recordings collected during naturalistic video viewing tasks.
 * Format: CSV
 * Update Frequency: Static
 * Size: ~1.7 GB
 
-### fNIRS SART Dataset
+### fNIRS SART
 * Description: Processed fNIRS recordings collected during the Sustained Attention to Response Task (SART).
 * Format: MATLAB (.mat) & CSV
 * Update Frequency: Static
 * Size: ~1.3 GB
 
-### Eye-Tracking Video-Viewing  Dataset
+### Eye-Tracking Video-Viewing
 * Description: Processed eye-tracking recordings collected during naturalistic video viewing tasks.
 * Format: Gzip-compressed CSV (.csv.gz)
 * Update Frequency: Static
 * Size: ~2.95 GB
 
-### Eye-Tracking SART Dataset
+### Eye-Tracking SART 
 * Description: Processed eye-tracking recordings collected during the Sustained Attention to Response Task (SART).
 * Format: Gzip-compressed CSV (.csv.gz)
 * Update Frequency: Static
 * Size: ~1 GB
 
-### Synchronized Video-Viewing Dataset
+### Synchronized Video-Viewing 
 * Description: Time-aligned processed eye-tracking and fNIRS datasets from the video-viewing task, synchronized using Lab Streaming Layer (LSL) streams recorded during data acquisition. Outputs include aligned multimodal signals prepared for integrated eye-tracking–fNIRS analyses.
 * Format: CSV
 * Update Frequency: Static
 * Size: ~1.45 GB
 
-### Synchronized SART Dataset
+### Synchronized SART 
 * Description: Time-aligned processed eye-tracking and fNIRS datasets from the SART task, synchronized using Lab Streaming Layer (LSL) streams and PsychoPy SART logs recorded during data acquisition. Outputs include aligned multimodal signals prepared for integrated eye-tracking–fNIRS analyses and SART trials/probe timing.
 * Format: CSV
 * Update Frequency: Static
