@@ -7,7 +7,7 @@ This repository serves as the central data storage and sharing platform for the 
 * Format: CSV
 * Update Frequency: Static
 * Size: ~1 KB
-* 
+  
 ### fNIRS Video-Viewing
 * Description: Processed fNIRS recordings collected during naturalistic video viewing tasks.
 * Format: CSV
