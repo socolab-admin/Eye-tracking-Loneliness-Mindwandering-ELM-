@@ -1,0 +1,479 @@
+---
+title: "Synchronize Eye-Tracking to fNIRS Video-Viewing Dataset"
+author: "Evans Alvarez"
+date: "2026-07-09"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# Libraries
+```{r}
+library(data.table)
+library(dplyr)
+library(fs)
+library(stringr)
+```
+# Synchronize video data
+```{r}
+# ----------------------------
+# Paths
+# ----------------------------
+ROOT_DIR <- "/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data"
+FNIRS_DIR <- file.path(ROOT_DIR, "processed/fNIRS_processed_videos")
+EYE_DIR   <- file.path(ROOT_DIR, "processed/eye_processed_videos")
+QC_DIR <- file.path(ROOT_DIR, "qc/sync")
+OUT_DIR <- file.path(ROOT_DIR, "processed/eye_sync_fNIRS_videos")
+
+# ----------------------------
+# Helper functions
+# ----------------------------
+normalize_id <- function(x) {
+  sprintf("%02d", as.integer(x))
+}
+
+extract_eye_id <- function(path) {
+  m <- str_match(basename(path), "^(\\d+)_")
+  if (is.na(m[1, 2])) return(NA_character_)
+  normalize_id(m[1, 2])
+}
+
+extract_fnirs_id <- function(path) {
+  m <- str_match(basename(path), "^S(\\d+)_")
+  if (is.na(m[1, 2])) return(NA_character_)
+  normalize_id(m[1, 2])
+}
+
+extract_fnirs_stimulus <- function(path) {
+  b <- basename(path)
+  b <- sub("^S\\d+_", "", b)
+  b <- sub("_postprocessed.*$", "", b)
+  str_to_lower(b)
+}
+
+extract_eye_stimulus <- function(path) {
+  b <- basename(path)
+  b <- sub("^\\d+_", "", b)
+  b <- sub("\\.csv(\\.gz)?$", "", b)
+  str_to_lower(b)
+}
+
+# ----------------------------
+# Scan folders
+# ----------------------------
+fnirs_files <- list.files(
+  FNIRS_DIR,
+  pattern = "\\.csv(\\.gz)?$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+eye_files <- list.files(
+  EYE_DIR,
+  pattern = "\\.csv(\\.gz)?$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+# ----------------------------
+# Build lookup tables
+# ----------------------------
+fnirs_tbl <- data.frame(
+  neural_file = fnirs_files,
+  subject_id = vapply(fnirs_files, extract_fnirs_id, character(1)),
+  stimulus = vapply(fnirs_files, extract_fnirs_stimulus, character(1)),
+  stringsAsFactors = FALSE
+) %>%
+  filter(!is.na(subject_id), !is.na(stimulus))
+
+eye_tbl <- data.frame(
+  eye_file = eye_files,
+  subject_id = vapply(eye_files, extract_eye_id, character(1)),
+  stimulus = vapply(eye_files, extract_eye_stimulus, character(1)),
+  stringsAsFactors = FALSE
+) %>%
+  filter(!is.na(subject_id), !is.na(stimulus))
+
+# ----------------------------
+# Match pairs
+# ----------------------------
+file_pairs <- inner_join(
+  eye_tbl,
+  fnirs_tbl,
+  by = c("subject_id", "stimulus")
+) %>%
+  select(eye_file, neural_file, subject_id, stimulus)
+
+fwrite(file_pairs, file.path(QC_DIR, "pairs_videos.csv"))
+cat("Wrote", nrow(file_pairs), "pairs to pairs_videos.csv\n")
+
+# Optional: unmatched files
+unmatched_eye <- anti_join(eye_tbl, fnirs_tbl, by = c("subject_id", "stimulus"))
+unmatched_fnirs <- anti_join(fnirs_tbl, eye_tbl, by = c("subject_id", "stimulus"))
+
+fwrite(unmatched_eye, file.path(QC_DIR, "unmatched_eye_videos_files.csv"))
+fwrite(unmatched_fnirs, file.path(QC_DIR, "unmatched_fnirs_videos_files.csv"))
+```
+
+```{r}
+stem <- function(x) sub("\\.csv(\\.gz)?$", "", basename(x), ignore.case = TRUE)
+# ----------------------------
+# Duration checker
+# ----------------------------
+check_pair_duration <- function(eye_file, neural_file) {
+  eye <- fread(eye_file)
+  neu <- fread(neural_file)
+
+  if (!"t_rel_ms" %in% names(eye)) stop("Eye file missing t_rel_ms: ", eye_file)
+  if (!"time" %in% names(eye)) stop("Eye file missing time: ", eye_file)
+  if (!"time" %in% names(neu)) stop("Neural file missing time: ", neural_file)
+
+  eye_t_rel_s <- eye$t_rel_ms / 1000
+  neu_t_s <- neu$time - first(neu$time)
+  
+  # Duration QC
+  eye_dur_s <- max(eye_t_rel_s, na.rm = TRUE) - min(eye_t_rel_s, na.rm = TRUE)
+  neu_dur_s <- max(neu_t_s, na.rm = TRUE) - min(neu_t_s, na.rm = TRUE)
+
+  data.frame(
+    eye_file = eye_file,
+    neural_file = neural_file,
+    eye_n = nrow(eye),
+    neural_n = nrow(neu),
+    eye_duration_s = eye_dur_s,
+    neural_duration_s = neu_dur_s,
+    duration_diff_s = eye_dur_s - neu_dur_s,
+    stringsAsFactors = FALSE
+  )
+}
+
+# ----------------------------
+# Sync function
+# ----------------------------
+sync_pair <- function(eye_file, neural_file, out_dir = OUT_DIR) {
+  dir_create(out_dir)
+
+  eye <- fread(eye_file)
+  neu <- fread(neural_file)
+
+  # Eye-tracking time in seconds
+  if (!"t_rel_ms" %in% names(eye)) stop("Eye file missing t_rel_ms")
+  # Downsample 1000 Hz to seconds
+  eye <- eye %>% mutate(t_rel_s = t_rel_ms / 1000)
+
+  # Neural time rebased to 0
+  if (!"time" %in% names(neu)) stop("Neural file missing time")
+  neu <- neu %>% mutate(t_rel_s = time - first(time))
+
+  # Neural bin width
+  # Sampling interval: 0.1024 seconds
+  # Sampling rate: 9.765625 Hz
+  dt <- median(diff(neu$t_rel_s), na.rm = TRUE)
+  
+  # Build one bin per neural row 
+  breaks <- c(neu$t_rel_s, tail(neu$t_rel_s, 1) + dt)
+
+  # Assign each eye sample to a neural bin
+  # Downsampling 1000 Hz to 9.765625 Hz
+  eye$bin <- cut(
+    eye$t_rel_s,
+    breaks = breaks,
+    labels = FALSE,
+    include.lowest = TRUE,
+    right = FALSE
+  )
+
+  # Summarize eye data within each neural bin
+  eye_sum <- eye %>%
+    filter(!is.na(bin)) %>%
+    group_by(bin) %>%
+    summarise(
+      eye_n = n(),
+      xp = mean(xp, na.rm = TRUE),
+      yp = mean(yp, na.rm = TRUE),
+      ps = mean(ps, na.rm = TRUE),
+      xpl_i = mean(xpl_i, na.rm = TRUE),
+      xpr_i = mean(xpr_i, na.rm = TRUE),
+      ypl_i = mean(ypl_i, na.rm = TRUE),
+      ypr_i = mean(ypr_i, na.rm = TRUE),
+      psl_i = mean(psl_i, na.rm = TRUE),
+      psr_i = mean(psr_i, na.rm = TRUE),
+      blink_prop = mean(blink_L | blink_R, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    rename(row = bin)
+
+  # Join summaries back to neural rows
+  out <- neu %>%
+    mutate(row = row_number()) %>%
+    left_join(eye_sum, by = "row") %>%
+    select(-row)
+
+  out_file <- file.path(
+    out_dir,
+    paste0(stem(neural_file), "_eye_synced.csv")
+  )
+
+  fwrite(out, out_file)
+  message("Wrote: ", out_file)
+}
+
+# ----------------------------
+# Main
+# ----------------------------
+pairs <- fread(file.path(QC_DIR, "pairs_videos.csv"))
+
+# 1) duration summary first
+duration_summary <- rbindlist(
+  lapply(seq_len(nrow(pairs)), function(i) {
+    cat("\nChecking pair:", i, "\n")
+    res <- check_pair_duration(pairs$eye_file[i], pairs$neural_file[i])
+    #print(res)
+    #res
+  }),
+  fill = TRUE
+)
+
+fwrite(duration_summary, file.path(QC_DIR, "duration_summary_videos.csv"))
+cat("\nWrote onset/duration summary to duration_summary_videos.csv\n")
+
+# 2) then sync
+for (i in seq_len(nrow(pairs))) {
+  sync_pair(pairs$eye_file[i], pairs$neural_file[i])
+}
+```
+
+# Synchronize SART data
+```{r}
+# ----------------------------
+# Paths
+# ----------------------------
+ROOT_DIR <- "/Users/evansalvarez/Eye-tracking-Loneliness-Mindwandering-ELM-/data"
+FNIRS_DIR <- file.path(ROOT_DIR, "processed/fNIRS_processed_SART/hbo_hbr_csv")
+EYE_DIR   <- file.path(ROOT_DIR, "processed/eye_processed_SART")
+QC_DIR    <- file.path(ROOT_DIR, "qc/sync")
+OUT_DIR   <- file.path(ROOT_DIR, "processed/eye_sync_fNIRS_SART")
+
+# ----------------------------
+# Helper functions
+# ----------------------------
+normalize_id <- function(x) {
+  sprintf("%02d", as.integer(x))
+}
+
+extract_eye_id <- function(path) {
+  m <- str_match(basename(path), "^data_preprocessedSART_(\\d+)_")
+  if (is.na(m[1, 2])) return(NA_character_)
+  normalize_id(m[1, 2])
+}
+
+extract_fnirs_id <- function(path) {
+  m <- str_match(basename(path), "^S(\\d+)_")
+  if (is.na(m[1, 2])) return(NA_character_)
+  normalize_id(m[1, 2])
+}
+
+# ----------------------------
+# Scan folders
+# ----------------------------
+fnirs_files <- list.files(
+  FNIRS_DIR,
+  pattern = "\\.csv(\\.gz)?$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+eye_files <- list.files(
+  EYE_DIR,
+  pattern = "\\.csv(\\.gz)?$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+# ----------------------------
+# Build lookup tables
+# ----------------------------
+fnirs_tbl <- data.frame(
+  neural_file = fnirs_files,
+  subject_id  = vapply(fnirs_files, extract_fnirs_id, character(1)),
+  stringsAsFactors = FALSE
+) %>%
+  filter(!is.na(subject_id))
+
+eye_tbl <- data.frame(
+  eye_file   = eye_files,
+  subject_id = vapply(eye_files, extract_eye_id, character(1)),
+  stringsAsFactors = FALSE
+) %>%
+  filter(!is.na(subject_id))
+
+# ----------------------------
+# Match pairs by subject only
+# ----------------------------
+file_pairs <- inner_join(
+  eye_tbl,
+  fnirs_tbl,
+  by = "subject_id"
+) %>%
+  select(eye_file, neural_file, subject_id)
+
+dir.create(QC_DIR, recursive = TRUE, showWarnings = FALSE)
+fwrite(file_pairs, file.path(QC_DIR, "pairs_SART.csv"))
+cat("Wrote", nrow(file_pairs), "pairs to pairs_SART.csv\n")
+
+# Optional: unmatched files
+unmatched_eye   <- anti_join(eye_tbl, fnirs_tbl, by = "subject_id")
+unmatched_fnirs <- anti_join(fnirs_tbl, eye_tbl, by = "subject_id")
+
+fwrite(unmatched_eye, file.path(QC_DIR, "unmatched_eye_SART_files.csv"))
+fwrite(unmatched_fnirs, file.path(QC_DIR, "unmatched_fnirs_SART_files.csv"))
+```
+
+```{r}
+stem <- function(x) sub("\\.csv(\\.gz)?$", "", basename(x), ignore.case = TRUE)
+# ----------------------------
+# Duration checker
+# ----------------------------
+check_pair_duration <- function(eye_file, neural_file) {
+  eye <- fread(eye_file)
+  neu <- fread(neural_file)
+
+  if (!"t_rel_ms" %in% names(eye)) stop("Eye file missing t_rel_ms: ", eye_file)
+  if (!"time" %in% names(eye)) stop("Eye file missing time: ", eye_file)
+  if (!"time" %in% names(neu)) stop("Neural file missing time: ", neural_file)
+
+  eye_t_rel_s <- eye$t_rel_ms / 1000
+  neu_t_s <- neu$time - first(neu$time)
+  
+  # Duration QC
+  eye_dur_s <- max(eye_t_rel_s, na.rm = TRUE) - min(eye_t_rel_s, na.rm = TRUE)
+  neu_dur_s <- max(neu_t_s, na.rm = TRUE) - min(neu_t_s, na.rm = TRUE)
+
+  data.frame(
+    eye_file = eye_file,
+    neural_file = neural_file,
+    eye_n = nrow(eye),
+    neural_n = nrow(neu),
+    eye_duration_s = eye_dur_s,
+    neural_duration_s = neu_dur_s,
+    duration_diff_s = eye_dur_s - neu_dur_s,
+    stringsAsFactors = FALSE
+  )
+}
+
+# ----------------------------
+# Sync function
+# ----------------------------
+sync_pair <- function(eye_file, neural_file, out_dir = OUT_DIR) {
+  dir_create(out_dir)
+
+  eye <- fread(eye_file)
+  neu <- fread(neural_file)
+
+  # Eye-tracking time in seconds
+  if (!"t_rel_ms" %in% names(eye)) stop("Eye file missing t_rel_ms")
+  # Downsample 1000 Hz to seconds
+  eye <- eye %>% mutate(t_rel_s = t_rel_ms / 1000)
+
+  # Neural time rebased to 0
+  if (!"time" %in% names(neu)) stop("Neural file missing time")
+  neu <- neu %>% mutate(t_rel_s = time - first(time))
+
+  # Neural bin width
+  # Sampling interval: 0.1024 seconds
+  # Sampling rate: 9.765625 Hz
+  dt <- median(diff(neu$t_rel_s), na.rm = TRUE)
+  
+  # Build one bin per neural row 
+  breaks <- c(neu$t_rel_s, tail(neu$t_rel_s, 1) + dt)
+
+  # Assign each eye sample to a neural bin
+  # Downsampling 1000 Hz to 9.765625 Hz
+  eye$bin <- cut(
+    eye$t_rel_s,
+    breaks = breaks,
+    labels = FALSE,
+    include.lowest = TRUE,
+    right = FALSE
+  )
+
+  # Summarize eye data within each neural bin
+  eye_sum <- eye %>%
+    filter(!is.na(bin)) %>%
+    group_by(bin) %>%
+    summarise(
+      eye_n = n(),
+      xp = mean(xp, na.rm = TRUE),
+      yp = mean(yp, na.rm = TRUE),
+      ps = mean(ps, na.rm = TRUE),
+      xpl_i = mean(xpl_i, na.rm = TRUE),
+      xpr_i = mean(xpr_i, na.rm = TRUE),
+      ypl_i = mean(ypl_i, na.rm = TRUE),
+      ypr_i = mean(ypr_i, na.rm = TRUE),
+      psl_i = mean(psl_i, na.rm = TRUE),
+      psr_i = mean(psr_i, na.rm = TRUE),
+      blink_prop = mean(blink_L | blink_R, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    rename(row = bin)
+
+  # Join summaries back to neural rows
+  out <- neu %>%
+    mutate(row = row_number()) %>%
+    left_join(eye_sum, by = "row") %>%
+    select(-row)
+
+  out_file <- file.path(
+    out_dir,
+    paste0(stem(neural_file), "_eye_synced.csv")
+  )
+
+  fwrite(out, out_file)
+  message("Wrote: ", out_file)
+}
+
+# ----------------------------
+# Main
+# ----------------------------
+pairs <- fread(file.path(QC_DIR, "pairs_SART.csv"))
+
+# 1) duration summary first
+duration_summary <- rbindlist(
+  lapply(seq_len(nrow(pairs)), function(i) {
+    cat("\nChecking pair:", i, "\n")
+    res <- check_pair_duration(pairs$eye_file[i], pairs$neural_file[i])
+    #print(res)
+    #res
+  }),
+  fill = TRUE
+)
+
+fwrite(duration_summary, file.path(QC_DIR, "duration_summary_SART.csv"))
+cat("\nWrote onset/duration summary to duration_summary_SART.csv\n")
+
+# 2) then sync
+for (i in seq_len(nrow(pairs))) {
+  sync_pair(pairs$eye_file[i], pairs$neural_file[i])
+}
+```
