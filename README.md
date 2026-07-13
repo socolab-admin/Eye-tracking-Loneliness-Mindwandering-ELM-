@@ -1,5 +1,5 @@
 # Eye-tracking-Loneliness-Mindwandering-ELM-
-This repository serves as the central data storage and sharing platform for the Eye-tracking, Loneliness, and Mind-Wandering (ELM) project, supporting collaboration among researchers at the University of Southern California (USC) and Ohio State University (OSU). The project investigates whether loneliness is associated with idiosyncratic patterns of neural processing, visual attention, and various subjective states during naturalistic  and experimental tasks. The repository contains processed fNIRS, eye-tracking, behavioral, and self-report survey datasets. Although the primary stakeholders are USC and OSU researchers working on the ELM project, the repository is publicly available to facilitate transparency, reproducibility, and secondary analyses by the broader scientific community.
+This repository serves as the central data storage and sharing platform for the Eye-tracking, Loneliness, and Mind-Wandering (ELM) project, supporting collaboration among researchers at the University of Southern California (USC) and Ohio State University (OSU). The project investigates whether loneliness is associated with idiosyncratic patterns of neural processing, visual attention, and various subjective states during naturalistic  and experimental tasks. The repository contains processed fNIRS, eye-tracking, and self-report data. Although the primary stakeholders are USC and OSU researchers working on the ELM project, the repository is publicly available to facilitate transparency, reproducibility, and secondary analyses by the broader scientific community.
 
 ## Dataset Overview
 ### fNIRS Video-Viewing  Dataset
@@ -59,8 +59,6 @@ This repository serves as the central data storage and sharing platform for the 
 
 
 ## Data Pipeline & Architecture
-Use this version in your README:
-
 ```mermaid
 flowchart TD
 
@@ -137,4 +135,24 @@ S8 --> QC
 S10 --> QC
 S3 --> QC
 ```
+## Data Dictionary 
+Detailed descriptions of each processed dataset, including variable definitions, data types, and metadata, are available in the repository's docs/dictionary.md.
+
+## Data Governance, Privacy & Licensing
+### Data Quality Constraints
+Processed datasets are generated through repository-specific preprocessing, synchronization, and quality-control pipelines. Quality-control summaries and preprocessing diagnostics are stored in `data/qc/`, while detailed dataset descriptions, variable definitions, and metadata are documented in `docs/dictionary.md`.
+
+### PII / Privacy Note
+All datasets included in this repository have been de-identified prior to inclusion. Personally identifiable information (PII) and other sensitive participant information have been removed or excluded from the shared datasets. This repository is intended solely for storing and sharing de-identified research data and associated analysis resources for the Eye-tracking, Loneliness, and Mind-Wandering (ELM) project.
+
+### License
+This repository is distributed under the **MIT License**. See the [`LICENSE`](LICENSE) file for additional information.
+
+### Contributors & Contact
+**Repository Maintainer:** Evans Alvarez — [evansalv@usc.edu](mailto:evansalv@usc.edu)
+
+**Collaborating Institutions:** University of Southern California (USC) and The Ohio State University (OSU)
+
+**Repository:** https://github.com/socolab-admin/Eye-tracking-Loneliness-Mindwandering-ELM-
+
 
