@@ -137,7 +137,14 @@ isc_roi %>% count(Chromophore, unit)
 # ================================================
 # Dyadic LMM helpers (same approach as ISC_lmm.Rmd)
 #   - every dyad entered twice (sub1/sub2 swapped) -> crossed (1|sub1) + (1|sub2)
-#   - SE corrected for the doubling; p penalized with df = unique dyads - 1
+#   - SE corrected for the doubling: SE_corrected = SE * sqrt(2N-1)/sqrt(N-1)
+#   - p_corrected = p from t_corrected = B / SE_corrected, df = N - 1
+#     (N = unique dyads). USED FOR INFERENCE AND FDR.
+#   - p_penalized = p from the UNcorrected t with df = N - 1, kept only for
+#     comparison with ISC_lmm.Rmd. A null simulation (30 subjects, 3 videos,
+#     300 models) gave a false-positive rate of 15.7% for p_penalized vs 6.0%
+#     for p_corrected at alpha = .05, because with hundreds of dyads the df
+#     penalty barely changes p while t is inflated ~sqrt(2) by the doubling.
 # ================================================
 
 # Z-score function
@@ -177,12 +184,16 @@ fit_continuous <- function(df, lonely_var = LONELY_VAR) {
   # ---- SE correction for doubled dyads ----
   mult <- sqrt(2 * n_dyads - 1) / sqrt(n_dyads - 1)
 
+  t_corrected <- unname(B / (SE * mult))
+
   data.frame(
     predictor    = lonely_var,
     B            = unname(B),
     t            = unname(t),
     SE           = unname(SE),
     SE_corrected = unname(SE * mult),
+    t_corrected  = t_corrected,
+    p_corrected  = 2 * pt(-abs(t_corrected), df = n_dyads - 1),
     p_asymp      = unname(coef_row["Pr(>|t|)"]),
     p_penalized  = 2 * pt(-abs(unname(t)), df = n_dyads - 1),
     n_dyads      = n_dyads,
@@ -206,12 +217,16 @@ fit_contrasts <- function(df) {
   mult <- sqrt(2 * n_dyads - 1) / sqrt(n_dyads - 1)
   t <- cont$estimate / cont$SE
 
+  t_corrected <- cont$estimate / (cont$SE * mult)
+
   data.frame(
     predictor    = as.character(cont$contrast),
     B            = cont$estimate,
     t            = t,
     SE           = cont$SE,
     SE_corrected = cont$SE * mult,
+    t_corrected  = t_corrected,
+    p_corrected  = 2 * pt(-abs(t_corrected), df = n_dyads - 1),
     p_asymp      = cont$p.value,
     p_penalized  = 2 * pt(-abs(t), df = n_dyads - 1),
     n_dyads      = n_dyads,
@@ -227,7 +242,7 @@ run_all <- function(df, fit_fun, level) {
     ungroup() %>%
     mutate(level = level) %>%
     group_by(Chromophore, predictor, level) %>%
-    mutate(p_fdr = p.adjust(p_penalized, method = "BH")) %>%   # FDR across channels / ROIs
+    mutate(p_fdr = p.adjust(p_corrected, method = "BH")) %>%   # FDR across channels / ROIs
     ungroup() %>%
     relocate(level, Chromophore, unit, predictor)
 }
@@ -266,8 +281,8 @@ ggplot(roi_cont, aes(x = unit, y = B, color = Chromophore)) +
 chan_cont <- run_all(isc_channel, fit_continuous, "channel")
 chan_bin  <- run_all(isc_channel, fit_contrasts,  "channel")
 
-chan_cont %>% arrange(p_penalized)
-chan_bin  %>% arrange(p_penalized)
+chan_cont %>% arrange(p_corrected)
+chan_bin  %>% arrange(p_corrected)
 
 write_csv(chan_cont, file.path(OUT_DIR, sprintf("channel_%s_%s.csv", LONELY_VAR, VIDEO_TERM)))
 write_csv(chan_bin,  file.path(OUT_DIR, sprintf("channel_binarized_%s.csv", VIDEO_TERM)))
@@ -277,11 +292,11 @@ chan_roi <- stack(roi_map) %>% rename(unit = values, ROI = ind)
 
 chan_cont %>%
   left_join(chan_roi, by = "unit") %>%
-  ggplot(aes(x = factor(unit, levels = unlist(channel_names)), y = t, fill = ROI)) +
+  ggplot(aes(x = factor(unit, levels = unlist(channel_names)), y = t_corrected, fill = ROI)) +
   geom_col() +
   geom_hline(yintercept = c(-2, 2), linetype = "dashed") +
   facet_wrap(~ Chromophore, ncol = 1) +
-  labs(x = "Channel", y = "t (loneliness)", title = "fNIRS ISC ~ loneliness, channel level") +
+  labs(x = "Channel", y = "t corrected (loneliness)", title = "fNIRS ISC ~ loneliness, channel level") +
   theme_minimal(base_size = 12) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 ```
