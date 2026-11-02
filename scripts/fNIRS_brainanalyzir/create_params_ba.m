@@ -120,6 +120,9 @@
 % --- ISC (video) ---
 %   params.isc: pairwise AR-prewhitened robust correlation (nirs.sFC.ar_corr)
 %               between every pair of subjects that watched the same video.
+%       roi_map          - ROI name -> S-D labels; ROI series = mean of the
+%                          subject's valid channels in the ROI.
+%       min_roi_channels - [DEFAULT 2] valid channels needed per subject/ROI.
 %
 % --- GLM (SART) ---
 %   params.glm: first-level AR-IRLS GLM, group-level mixed effects.
@@ -243,6 +246,14 @@ params.isc.ar_order_xFs = 4;        % AR model order = 4 x Fs (as in CICI)
 params.isc.robust       = true;
 params.isc.min_overlap_sec = 60;    % dyad/channel kept only if >= 60 s overlap
 params.isc.skip_bad_subjects = true;
+% ROI map (same montage / channel labels as probeInfo.probes.index_c)
+params.isc.roi_map.vmPFC  = ["S1-D1","S1-D8","S1-D9"];
+params.isc.roi_map.dmPFC  = ["S9-D11","S9-D9","S9-D3","S2-D9","S10-D9"];
+params.isc.roi_map.ldlPFC = ["S2-D2","S4-D2","S4-D3","S4-D5","S6-D2","S6-D5","S3-D2"];
+params.isc.roi_map.rdlPFC = ["S10-D10","S10-D11","S12-D11","S12-D10","S12-D12","S14-D12","S14-D10","S11-D10"];
+params.isc.roi_map.lTPJ   = ["S8-D7","S8-D6","S7-D7","S7-D6"];
+params.isc.roi_map.rTPJ   = ["S15-D14","S15-D13","S16-D14","S16-D13"];
+params.isc.min_roi_channels = 2;   % a subject needs >= 2 valid channels in the ROI
 
 %% ===============================
 %% GLM (SART)

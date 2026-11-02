@@ -1,0 +1,287 @@
+---
+title: "fNIRS video ISC (Brain AnalyzIR AR-ISC) ~ Loneliness"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Settings
+```{r}
+# ================================================
+# Paths and analysis options
+# ================================================
+
+# ---- Paths ----
+BA_OUT    <- normalizePath("~/fNIRS/ELM_BA_outputs", mustWork = TRUE)   # run_main_ba output folder
+UCLA_PATH <- normalizePath("~/fNIRS/ELM/ucla_loneliness_scores.csv", mustWork = TRUE)
+OUT_DIR   <- file.path(BA_OUT, "isc", "lmm_results")
+dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+
+# ---- Options ----
+CHROMOPHORES <- c("HbO", "HbR")
+VIDEOS       <- NULL          # NULL = all videos; e.g. c("Zima", "Splitscreen")
+EXCLUDE_IDS  <- c()           # e.g. c("S76") (subjects removed from all dyads)
+VIDEO_TERM   <- "fixed"       # "fixed": loneliness + video;  "random": (1|stimulus)
+LONELY_VAR   <- "ucla_max"    # dyad loneliness: "ucla_max", "ucla_min" or "ucla_mean"
+```
+
+# ROI map
+```{r}
+# map ROI to list of channels (same montage / channel order as probeInfo)
+roi_map <- list(
+    vmPFC  = c("S1-D1","S1-D8","S1-D9"),
+    dmPFC  = c("S9-D11", "S9-D9", "S9-D3", "S2-D9", "S10-D9"),
+    ldlPFC = c("S2-D2","S4-D2", "S4-D3", "S4-D5", "S6-D2", "S6-D5", "S3-D2"),
+    rdlPFC = c("S10-D10", "S10-D11", "S12-D11", "S12-D10", "S12-D12", "S14-D12", "S14-D10", "S11-D10"),
+    lTPJ   = c("S8-D7","S8-D6","S7-D7","S7-D6"),
+    rTPJ   = c("S15-D14","S15-D13","S16-D14","S16-D13")
+)
+
+roi_names <- list("vmPFC", "dmPFC", "ldlPFC", "rdlPFC", "lTPJ", "rTPJ")
+
+channel_names <- as.list(unique(c(
+  roi_map$vmPFC,
+  roi_map$dmPFC,
+  roi_map$ldlPFC,
+  roi_map$rdlPFC,
+  roi_map$lTPJ,
+  roi_map$rTPJ
+)))
+```
+
+# Load ISC + loneliness
+```{r}
+# ================================================
+# Load dyadic AR-ISC (from ba_video_isc.m) and UCLA scores
+#   channel ISC: isc/dyad_video_channel_ar_isc.csv
+#   ROI ISC:     isc/dyad_video_roi_ar_isc.csv
+#                (ROI = mean of the subject's valid channels, then ar_corr)
+# ================================================
+
+# ---- Libraries ----
+library(dplyr)
+library(tidyr)
+library(readr)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(ggplot2)
+
+# ---- Read ISC ----
+read_isc <- function(file, unit_col) {
+  read_csv(file, show_col_types = FALSE) %>%
+    rename(id1 = sub1, id2 = sub2, stimulus = Video, unit = all_of(unit_col)) %>%
+    mutate(across(c(id1, id2, stimulus, Chromophore, unit), as.character))
+}
+
+isc_channel <- read_isc(file.path(BA_OUT, "isc", "dyad_video_channel_ar_isc.csv"), "Channel")
+isc_roi     <- read_isc(file.path(BA_OUT, "isc", "dyad_video_roi_ar_isc.csv"), "ROI")
+
+# Keep the ROI channels only (channels outside the ROI map are not modelled)
+isc_channel <- isc_channel %>% filter(unit %in% unlist(channel_names))
+
+# ---- UCLA (pid "02" -> id "S02") ----
+ucla <- read_csv(UCLA_PATH, show_col_types = FALSE,
+                 col_types = cols(pid = col_character())) %>%
+  transmute(id = paste0("S", sprintf("%02d", as.integer(pid))), ucla = ucla_total)
+
+# ---- Dyad-level loneliness ----
+add_dyad_loneliness <- function(df, ucla) {
+  df %>%
+    filter(!id1 %in% EXCLUDE_IDS, !id2 %in% EXCLUDE_IDS) %>%
+    { if (is.null(VIDEOS)) . else filter(., stimulus %in% VIDEOS) } %>%
+    left_join(ucla %>% rename(id1 = id, ucla1 = ucla), by = "id1") %>%
+    left_join(ucla %>% rename(id2 = id, ucla2 = ucla), by = "id2") %>%
+    filter(!is.na(ucla1), !is.na(ucla2), is.finite(isc_z)) %>%
+    mutate(
+      ucla_max  = pmax(ucla1, ucla2),
+      ucla_min  = pmin(ucla1, ucla2),
+      ucla_mean = (ucla1 + ucla2) / 2
+    )
+}
+
+isc_channel <- add_dyad_loneliness(isc_channel, ucla)
+isc_roi     <- add_dyad_loneliness(isc_roi, ucla)
+
+# ---- Median split restricted to ISC participants (as in ISC_lmm.Rmd) ----
+isc_ids <- unique(c(isc_channel$id1, isc_channel$id2))
+isc_median <- median(ucla$ucla[ucla$id %in% isc_ids], na.rm = TRUE)
+message("ISC participants: ", length(isc_ids), " | UCLA median = ", isc_median)
+
+make_dyad_type <- function(df) {
+  df %>%
+    mutate(
+      lonely1 = ucla1 > isc_median,
+      lonely2 = ucla2 > isc_median,
+      binarized_lonely = case_when(
+        lonely1 & lonely2   ~ "HH",
+        !lonely1 & !lonely2 ~ "LL",
+        TRUE                ~ "HL"
+      ),
+      binarized_lonely = factor(binarized_lonely, levels = c("HH", "HL", "LL"))
+    )
+}
+
+isc_channel <- make_dyad_type(isc_channel)
+isc_roi     <- make_dyad_type(isc_roi)
+
+# ---- Audit ----
+isc_roi %>% distinct(id1, id2, stimulus) %>% count(stimulus, name = "n_dyads")
+isc_roi %>% count(Chromophore, unit)
+```
+
+# Model helpers
+```{r}
+# ================================================
+# Dyadic LMM helpers (same approach as ISC_lmm.Rmd)
+#   - every dyad entered twice (sub1/sub2 swapped) -> crossed (1|sub1) + (1|sub2)
+#   - SE corrected for the doubling; p penalized with df = unique dyads - 1
+# ================================================
+
+# Z-score function
+zstd <- function(x) as.numeric(scale(x))
+
+# Doubling function
+double_for_lmm <- function(df) {
+  d1 <- df %>% mutate(sub1 = id1, sub2 = id2)
+  d2 <- df %>% mutate(sub1 = id2, sub2 = id1)
+  bind_rows(d1, d2) %>% mutate(outcome = isc_z)
+}
+
+n_unique_dyads <- function(df) {
+  df %>% transmute(a = pmin(id1, id2), b = pmax(id1, id2)) %>% distinct() %>% nrow()
+}
+
+# Video term: fixed (loneliness + video) or random intercept
+video_rhs <- function(df) {
+  if (n_distinct(df$stimulus) < 2) return("")
+  if (VIDEO_TERM == "fixed") " + stimulus" else " + (1|stimulus)"
+}
+
+lmm_control <- lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e5))
+
+# ---- Continuous loneliness ----
+fit_continuous <- function(df, lonely_var = LONELY_VAR) {
+  n_dyads <- n_unique_dyads(df)
+  doubled <- double_for_lmm(df)
+  doubled$lonely_z <- zstd(doubled[[lonely_var]])
+  f <- as.formula(paste0("outcome ~ lonely_z", video_rhs(df), " + (1|sub1) + (1|sub2)"))
+  model <- tryCatch(lmer(f, data = doubled, control = lmm_control), error = function(e) NULL)
+  if (is.null(model)) return(NULL)
+
+  coef_row <- summary(model)$coefficients["lonely_z", ]
+  B  <- coef_row["Estimate"]; SE <- coef_row["Std. Error"]; t <- coef_row["t value"]
+
+  # ---- SE correction for doubled dyads ----
+  mult <- sqrt(2 * n_dyads - 1) / sqrt(n_dyads - 1)
+
+  data.frame(
+    predictor    = lonely_var,
+    B            = unname(B),
+    t            = unname(t),
+    SE           = unname(SE),
+    SE_corrected = unname(SE * mult),
+    p_asymp      = unname(coef_row["Pr(>|t|)"]),
+    p_penalized  = 2 * pt(-abs(unname(t)), df = n_dyads - 1),
+    n_dyads      = n_dyads,
+    singular     = isSingular(model)
+  )
+}
+
+# ---- Binarized loneliness: planned contrasts ----
+fit_contrasts <- function(df) {
+  if (n_distinct(df$binarized_lonely) < 3) return(NULL)
+  n_dyads <- n_unique_dyads(df)
+  doubled <- double_for_lmm(df)
+  f <- as.formula(paste0("outcome ~ binarized_lonely", video_rhs(df), " + (1|sub1) + (1|sub2)"))
+  model <- tryCatch(lmer(f, data = doubled, control = lmm_control), error = function(e) NULL)
+  if (is.null(model)) return(NULL)
+
+  Contrasts <- list(HHvsLL = c(1, 0, -1), HHvsHL = c(1, -1, 0), HLvsLL = c(0, 1, -1))
+  emm_res <- emmeans(model, ~ binarized_lonely, contr = Contrasts,
+                     adjust = "none", lmer.df = "asymp")
+  cont <- summary(emm_res$contrasts)
+  mult <- sqrt(2 * n_dyads - 1) / sqrt(n_dyads - 1)
+  t <- cont$estimate / cont$SE
+
+  data.frame(
+    predictor    = as.character(cont$contrast),
+    B            = cont$estimate,
+    t            = t,
+    SE           = cont$SE,
+    SE_corrected = cont$SE * mult,
+    p_asymp      = cont$p.value,
+    p_penalized  = 2 * pt(-abs(t), df = n_dyads - 1),
+    n_dyads      = n_dyads,
+    singular     = isSingular(model)
+  )
+}
+
+# ---- Run one model type over every chromophore x unit ----
+run_all <- function(df, fit_fun, level) {
+  df %>%
+    group_by(Chromophore, unit) %>%
+    group_modify(~ { res <- fit_fun(.x); if (is.null(res)) tibble() else as_tibble(res) }) %>%
+    ungroup() %>%
+    mutate(level = level) %>%
+    group_by(Chromophore, predictor, level) %>%
+    mutate(p_fdr = p.adjust(p_penalized, method = "BH")) %>%   # FDR across channels / ROIs
+    ungroup() %>%
+    relocate(level, Chromophore, unit, predictor)
+}
+```
+
+# ROI level
+```{r}
+# ================================================
+# isc_z ~ loneliness + video + (1|sub1) + (1|sub2), per ROI and chromophore
+# ================================================
+roi_cont <- run_all(isc_roi, fit_continuous, "ROI")
+roi_bin  <- run_all(isc_roi, fit_contrasts,  "ROI")
+
+roi_cont
+roi_bin
+
+write_csv(roi_cont, file.path(OUT_DIR, sprintf("roi_%s_%s.csv", LONELY_VAR, VIDEO_TERM)))
+write_csv(roi_bin,  file.path(OUT_DIR, sprintf("roi_binarized_%s.csv", VIDEO_TERM)))
+
+# ---- Plot ----
+ggplot(roi_cont, aes(x = unit, y = B, color = Chromophore)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(ymin = B - SE_corrected, ymax = B + SE_corrected),
+                position = position_dodge(width = 0.5), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(x = "ROI", y = paste0("Effect of z(", LONELY_VAR, ") on ISC (Fisher z)"),
+       title = "fNIRS ISC ~ loneliness, ROI level") +
+  theme_minimal(base_size = 14)
+```
+
+# Channel level
+```{r}
+# ================================================
+# Same models per channel (ROI channels only); FDR across channels
+# ================================================
+chan_cont <- run_all(isc_channel, fit_continuous, "channel")
+chan_bin  <- run_all(isc_channel, fit_contrasts,  "channel")
+
+chan_cont %>% arrange(p_penalized)
+chan_bin  %>% arrange(p_penalized)
+
+write_csv(chan_cont, file.path(OUT_DIR, sprintf("channel_%s_%s.csv", LONELY_VAR, VIDEO_TERM)))
+write_csv(chan_bin,  file.path(OUT_DIR, sprintf("channel_binarized_%s.csv", VIDEO_TERM)))
+
+# ---- Plot: t per channel, coloured by ROI ----
+chan_roi <- stack(roi_map) %>% rename(unit = values, ROI = ind)
+
+chan_cont %>%
+  left_join(chan_roi, by = "unit") %>%
+  ggplot(aes(x = factor(unit, levels = unlist(channel_names)), y = t, fill = ROI)) +
+  geom_col() +
+  geom_hline(yintercept = c(-2, 2), linetype = "dashed") +
+  facet_wrap(~ Chromophore, ncol = 1) +
+  labs(x = "Channel", y = "t (loneliness)", title = "fNIRS ISC ~ loneliness, channel level") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```

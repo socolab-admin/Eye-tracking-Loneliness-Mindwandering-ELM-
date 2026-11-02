@@ -18,7 +18,10 @@
 % OUTPUTS (params.paths.outdir/isc/):
 %     dyad_video_channel_ar_isc.csv - one row per video x dyad x chromophore x
 %         channel: Video, sub1, sub2, Chromophore, Channel, isc_r, isc_z,
-%         isc_p, n_overlap, ar_order
+%         isc_p, n_overlap, n_channels, ar_order
+%     dyad_video_roi_ar_isc.csv     - same per ROI (params.isc.roi_map): the
+%         z-scored channels of each ROI are averaged WITHIN each subject
+%         (>= params.isc.min_roi_channels valid channels), then correlated
 %
 % NOTES:
 %     - Blocks of the two subjects are aligned from the video onset (+ shift)
@@ -47,11 +50,16 @@ end
 subs = string(fieldnames(blocks));
 
 videos = matlab.lang.makeValidName(cellstr(params.video.names));
-rows = {};
+vars = {'Video', 'sub1', 'sub2', 'Chromophore', 'Unit', 'isc_r', 'isc_z', ...
+    'isc_p', 'n_overlap', 'n_channels', 'ar_order'};
+rowsCh  = cell(0, numel(vars));
+rowsRoi = cell(0, numel(vars));
+roiNames = fieldnames(params.isc.roi_map);
+
 for v = 1:numel(videos)
     vid = videos{v};
     has = subs(arrayfun(@(s) isfield(blocks.(char(s)), vid), subs));
-    fprintf('ISC %s: %d subjects, %d dyads\n', vid, numel(has), nchoosek(max(numel(has),2), 2) * (numel(has) > 1));
+    fprintf('ISC %s: %d subjects, %d dyads\n', vid, numel(has), numel(has) * (numel(has) - 1) / 2);
     for a = 1:numel(has) - 1
         for b = a + 1:numel(has)
             for chrom = string(params.isc.chromophores)
@@ -59,25 +67,65 @@ for v = 1:numel(videos)
                 B = blocks.(char(has(b))).(vid).(char(chrom));
                 n = min(size(A.data, 1), size(B.data, 1));
                 order = round(params.isc.ar_order_xFs * A.Fs);
+                minRows = params.isc.min_overlap_sec * A.Fs;
+
+                % ---- Channel level ----
                 for c = 1:numel(A.labels)
-                    x = [A.data(1:n, c), B.data(1:n, c)];
-                    x = x(all(isfinite(x), 2), :);
-                    if size(x, 1) < params.isc.min_overlap_sec * A.Fs
-                        continue
-                    end
-                    [R, P] = nirs.sFC.ar_corr(x, order, params.isc.robust);
-                    r = R(1, 2);
-                    rows(end+1, :) = {string(vid), has(a), has(b), chrom, A.labels(c), ...
-                        r, atanh(r), P(1, 2), size(x, 1), order}; %#ok<AGROW>
+                    [r, p, nOk] = pairCorr(A.data(1:n, c), B.data(1:n, c), order, params.isc.robust, minRows);
+                    if isnan(r), continue, end
+                    rowsCh(end+1, :) = {string(vid), has(a), has(b), chrom, A.labels(c), ...
+                        r, atanh(r), p, nOk, 1, order}; %#ok<AGROW>
+                end
+
+                % ---- ROI level: average channels within subject, then correlate ----
+                % (each subject needs >= min_roi_channels valid channels in the ROI)
+                for k = 1:numel(roiNames)
+                    inRoi = ismember(A.labels, string(params.isc.roi_map.(roiNames{k})));
+                    [xa, na] = roiSeries(A.data(1:n, inRoi), params.isc.min_roi_channels);
+                    [xb, nb] = roiSeries(B.data(1:n, inRoi), params.isc.min_roi_channels);
+                    if isempty(xa) || isempty(xb), continue, end
+                    [r, p, nOk] = pairCorr(xa, xb, order, params.isc.robust, minRows);
+                    if isnan(r), continue, end
+                    rowsRoi(end+1, :) = {string(vid), has(a), has(b), chrom, string(roiNames{k}), ...
+                        r, atanh(r), p, nOk, min(na, nb), order}; %#ok<AGROW>
                 end
             end
         end
     end
 end
 
-isc = cell2table(rows, 'VariableNames', {'Video', 'sub1', 'sub2', 'Chromophore', ...
-    'Channel', 'isc_r', 'isc_z', 'isc_p', 'n_overlap', 'ar_order'});
-outFile = fullfile(outDir, 'dyad_video_channel_ar_isc.csv');
-writetable(isc, outFile);
-fprintf('ISC: %d rows written to %s\n', height(isc), outFile);
+iscCh  = cell2table(rowsCh,  'VariableNames', vars);
+iscRoi = cell2table(rowsRoi, 'VariableNames', vars);
+iscCh  = renamevars(iscCh,  'Unit', 'Channel');
+iscRoi = renamevars(iscRoi, 'Unit', 'ROI');
+writetable(iscCh,  fullfile(outDir, 'dyad_video_channel_ar_isc.csv'));
+writetable(iscRoi, fullfile(outDir, 'dyad_video_roi_ar_isc.csv'));
+fprintf('ISC: %d channel rows, %d ROI rows written to %s\n', height(iscCh), height(iscRoi), outDir);
+if height(iscCh) == 0
+    warning('BA:NoDyads', 'No dyads: no two subjects share a video (normal for a small test run).');
+end
+isc = iscCh;
+end
+
+function [r, p, nOk] = pairCorr(x1, x2, order, robust, minRows)
+x = [x1(:), x2(:)];
+x = x(all(isfinite(x), 2), :);
+nOk = size(x, 1);
+r = NaN; p = NaN;
+if nOk < minRows
+    return
+end
+[R, P] = nirs.sFC.ar_corr(x, order, robust);
+r = R(1, 2);
+p = P(1, 2);
+end
+
+function [x, nValid] = roiSeries(X, minChannels)
+valid = any(isfinite(X), 1);
+nValid = sum(valid);
+if nValid < minChannels
+    x = [];
+else
+    x = mean(X(:, valid), 2, 'omitnan');
+end
 end
